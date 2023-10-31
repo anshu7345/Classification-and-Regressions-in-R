@@ -1,0 +1,197 @@
+---
+title: "mla-2 cia1"
+output: html_document
+date: "2023-10-22"
+---
+
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(ada)
+library(xgboost)
+library(pROC)
+```
+```{r}
+setwd("C:/Users/Phoni/Downloads")
+data = read.csv("MLA CIA - 4.csv")
+data
+```
+
+```{r}
+data=na.omit(data)
+```
+```{r}
+is.na(data)
+```
+```{r}
+library(ggplot2)
+```
+
+
+```{r}
+# Check for missing values
+sum(is.na(data))
+
+# Remove rows with missing values
+data_clean <- data[complete.cases(data), ]
+data_clean
+
+# Drop the  column and save the modified data frame into a new variable
+data6 <- data_clean[, -which(names(data_clean) == "Cust_ID")]
+data6
+```
+
+
+```{r}
+data6$Gender=as.numeric(factor(data6$Gender,levels = c('M','F'),labels = c(1,2)))
+data6$Occupation=as.numeric(factor(data6$Occupation,levels = c('SAL','PROF','SELF-EMP','SENP'),labels = c(1,2,3,4)))
+data6$AGE_BKT=as.numeric(factor(data6$AGE_BKT,levels = c('26-30','41-45','>50','36-40','46-50','31-35','<25'),labels = c(1,2,3,4,5,6,7)))
+```
+
+##data spliting
+```{r}
+# Set a random seed for reproducibility
+set.seed(123)
+
+# Create an index for the split (70% for training, 30% for testing)
+index <- createDataPartition(data6$Target, p = 0.7, list = FALSE)
+
+# Split the data into training and test sets
+train_data <- data6[index, ]
+test_data <- data6[-index, ]
+
+```
+
+
+```{r}
+set.seed(123)
+split = sample.split(data6$Target, SplitRatio = 0.8)
+training_set = subset(data6, split == TRUE)
+test_set = subset(data6, split == FALSE)
+```
+
+## ada Boost Model
+```{r}
+# AdaBoost Model# Build an AdaBoost model
+boost_model <- ada(formula = Target ~.,data = training_set,type = "discrete",control = rpart.control(cp = 0.01))
+```
+
+```{r}
+ada_pred <- predict(boost_model, newdata = test_set, type = "response")
+
+
+# Convert probabilities to class labels (0 or 1) based on a threshold (0.5)
+ada_pred_class <- ifelse(ada_pred > 0.5, 1, 0)
+```
+```{r}
+# Create a confusion matrix
+ada_cm=confusionMatrix(factor(ada_pred),factor(test_set$Target))
+ada_cm
+```
+
+
+## Roc 
+```{r}
+roc_obj1 <- roc(test_set$Target,as.numeric(ada_pred)) 
+plot(roc_obj1, main = "ROC Curve for AdaBoost Model", col = "green")
+```
+
+```{r}
+# Create the training and test matrices
+train_matrix <- xgb.DMatrix(data = as.matrix(train_data[, c("Age", "Balance", "No_OF_CR_TXNS", "Holding_Period", "SCR")]),
+                            label = train_data$Target)
+
+test_matrix <- xgb.DMatrix(data = as.matrix(test_data[, c("Age", "Balance", "No_OF_CR_TXNS", "Holding_Period", "SCR")]),
+                           label = test_data$Target)
+```
+
+
+
+```{r}
+params <- list(
+booster = "gbtree",
+objective = "binary:logistic",
+eta = 0.01,
+depth = 6,
+eval_metric = "logloss"
+)
+```
+```{r}
+xgb_model <- xgb.train(data = train_matrix,
+params = params,
+nrounds = 50,
+watchlist = list(train =
+
+train_matrix, test = test_matrix),
+verbose = 0)
+```
+
+
+```{r}
+# Predictions and performance for XGBoost
+xgb_pred_prob <- predict(xgb_model, test_matrix)  # For probabilities
+xgb_pred <- ifelse(xgb_pred_prob > 0.5, 1, 0)  # Convert to class labels
+```
+
+
+
+```{r}
+#xgb_cm <- confusionMatrix(as.factor(xgb_pred),test_data$Target)
+confusionMatrix(factor(xgb_pred),factor(test_data$Target))
+```
+
+```{r}
+
+# Create a ROC curve object
+roc_obj2 <- roc(test_data$Target, xgb_pred_prob)
+
+# Plot the ROC curve
+plot(roc_obj2, col = "blue", main = "ROC Curve for XGBoost Model")
+
+```
+
+
+
+
+
+```{r}
+
+# Assuming you have roc_obj1 and roc_obj2 already calculated
+
+# Create a blank ROC plot for the first curve
+plot(roc_obj1, col = "green",main = "ROC Curve for XGBoost Model and ADA Boost")
+
+# Add the second ROC curve to the same plot
+lines(roc_obj2, col = "blue")
+
+# Add a legend to differentiate between the two curves
+legend("bottomright", legend = c("ADA Boost", "XG Boost"), col = c("green", "blue"), lty = 1)
+
+# Calculate and display the AUC values
+auc_value1 <- auc(roc_obj1)
+auc_value2 <- auc(roc_obj2)
+
+# Add AUC values as text labels to the plot
+text(0.0, 0.4, paste("AUC (ADA Boost) = ", round(auc_value1, 2)), col = "green")
+text(0.0, 0.35, paste("AUC (XG Boost) = ", round(auc_value2, 2)), col = "blue")
+
+```
+```{r}
+# Create a data frame to hold the information
+data <- data.frame(
+  Model = c("ADA Boost", "XG Boost"),
+  Accuracy = c(0.9609, 0.9523),
+  Sensitivity = c(0.9939, 0.99818),
+  Specificity = c(0.2273, 0.01852),
+  Pos_Pred_Value = c(0.9663, 0.95387),
+  Neg_Pred_Value = c(,0.5238)
+)
+
+# Print the data frame
+print(data)
+
+```
+
+
